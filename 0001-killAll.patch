@@ -1,0 +1,76 @@
+From 00011a8f5800f89e89b86d9f61b83213544c2b27 Mon Sep 17 00:00:00 2001
+From: luis-casta7 <luis_casta7@outlook.com>
+Date: Sat, 8 Jan 2022 18:09:24 -0600
+Subject: [PATCH] killAll
+
+---
+ config.h |  1 +
+ dwm.c    | 26 ++++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/config.h b/config.h
+index a2ac963..b244d6b 100644
+--- a/config.h
++++ b/config.h
+@@ -74,6 +74,7 @@ static Key keys[] = {
+ 	{ MODKEY,                       XK_Return, zoom,           {0} },
+ 	{ MODKEY,                       XK_Tab,    view,           {0} },
+ 	{ MODKEY|ShiftMask,             XK_c,      killclient,     {0} },
++	{ MODKEY|ShiftMask,             XK_x,      killall,		   {0} },
+ 	{ MODKEY,                       XK_t,      setlayout,      {.v = &layouts[0]} },
+ 	{ MODKEY,                       XK_f,      setlayout,      {.v = &layouts[1]} },
+ 	{ MODKEY,                       XK_m,      setlayout,      {.v = &layouts[2]} },
+diff --git a/dwm.c b/dwm.c
+index a96f33c..4242910 100644
+--- a/dwm.c
++++ b/dwm.c
+@@ -178,6 +178,7 @@ static void grabkeys(void);
+ static void incnmaster(const Arg *arg);
+ static void keypress(XEvent *e);
+ static void killclient(const Arg *arg);
++static void killall(const Arg *arg);
+ static void manage(Window w, XWindowAttributes *wa);
+ static void mappingnotify(XEvent *e);
+ static void maprequest(XEvent *e);
+@@ -1002,6 +1003,17 @@ keypress(XEvent *e)
+ 			keys[i].func(&(keys[i].arg));
+ }
+ 
++void
++killwin(const Window *win) {
++		XGrabServer(dpy);
++		XSetErrorHandler(xerrordummy);
++		XSetCloseDownMode(dpy, DestroyAll);
++		XKillClient(dpy, *win);
++		XSync(dpy, False);
++		XSetErrorHandler(xerror);
++		XUngrabServer(dpy);
++}
++
+ void
+ killclient(const Arg *arg)
+ {
+@@ -1018,6 +1030,20 @@ killclient(const Arg *arg)
+ 	}
+ }
+ 
++void
++killall(const Arg *arg)
++{
++	Client *i = NULL;
++
++	if (!selmon->sel) 
++		return;
++	for (i = selmon->clients; i; i = i->next) {
++		if (ISVISIBLE(i) && !sendevent(i, wmatom[WMDelete])) {
++			killwin(&(i->win));
++		}
++	}
++}
++
+ void
+ manage(Window w, XWindowAttributes *wa)
+ {
+-- 
+2.30.2
+
