@@ -1,0 +1,242 @@
+From d7611da6663d423928aafad75d82948817c6e048 Mon Sep 17 00:00:00 2001
+From: luis-casta7 <luis_casta7@outlook.com>
+Date: Wed, 19 Jan 2022 15:52:39 -0600
+Subject: [PATCH] pomodoro
+
+---
+ components/pomodoro.c | 113 ++++++++++++++++++++++++++++++++++++++++++
+ slstatus.c            |   2 +
+ slstatus.h            |   3 ++
+ util.c                |  36 ++++++++++++++
+ util.h                |   7 +++
+ 5 files changed, 161 insertions(+)
+ create mode 100644 components/pomodoro.c
+
+diff --git a/components/pomodoro.c b/components/pomodoro.c
+new file mode 100644
+index 0000000..66680bb
+--- /dev/null
++++ b/components/pomodoro.c
+@@ -0,0 +1,113 @@
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++
++#include "../util.h"
++
++#if defined(__linux__)
++	const char *
++	reduceTime(void)
++	{
++		pomo_seconds = pomo_seconds - 1;
++		return pomo_seconds <= 0 ?
++			bprintf("-%.2d:%.2d", (pomo_seconds/60)*-1, (pomo_seconds%60)*-1) :
++			bprintf("%.2d:%.2d", pomo_seconds/60, pomo_seconds%60);
++	}
++
++	const char *
++	shouldBlink(char *returnString) 
++	{
++		char symbol[10];
++		//Paused
++		if (pomo_state == 0) {
++		}
++
++		if (previous_time == POMO_BREAK_SECONDS || previous_time == POMO_LONG_BREAK_SECONDS) {
++			strncpy(symbol, bprintf("%d %s", pomo_sessions, "◼"), 10);
++		} else {
++			strncpy(symbol, bprintf("%d %s", pomo_sessions, "▶"), 10);
++		}
++
++		if (pomo_seconds < 0 && pomo_blink == 0) {
++			pomo_blink = 1;
++			return "";
++		} else if (pomo_seconds < 0 && pomo_blink == 1) {
++			pomo_blink = 0;
++		}
++
++		return bprintf("%s %s", symbol, returnString);
++	}
++
++	int
++	getNewSeconds(void) 
++	{
++
++		if (previous_time != POMO_WORK_SECONDS) {
++			previous_time = POMO_WORK_SECONDS;
++			return POMO_WORK_SECONDS;
++		} else {
++			pomo_sessions++;
++			if (pomo_sessions % POMO_WORK_SESSIONS == 0) {
++				previous_time = POMO_LONG_BREAK_SECONDS;
++				return POMO_LONG_BREAK_SECONDS;
++			}
++			previous_time = POMO_BREAK_SECONDS;
++			return POMO_BREAK_SECONDS;
++		}
++
++		return 0;
++	}
++
++	const char *
++	pomodoro(void)
++	{
++		char state[50];
++		char returnString[50];
++
++		//will get either 0, 1, 2, or 3
++		openPomoFile(&pomofptr, "r");
++		
++		if (fgets(state, 50, (FILE *)pomofptr) != NULL) {
++			// paused, just display what we currently have
++			if (strcmp(state, "0") == 0) {
++				return pomo_seconds <= 0 ?
++					bprintf("◼ -%.2d:%.2d", (pomo_seconds/60)*-1, (pomo_seconds%60)*-1) :
++					bprintf("◼ %.2d:%.2d", pomo_seconds/60, pomo_seconds%60);
++			}
++			//progressing reduce seconds
++			else if (strcmp(state, "1") == 0) {
++				strncpy(returnString, reduceTime(), 50);
++			}
++
++			//transition to next stage
++			else if (strcmp(state, "2") == 0) {
++				pomo_blink = 0;
++				pomo_seconds = getNewSeconds();
++
++				fclose(pomofptr);
++				openPomoFile(&pomofptr, "w");
++				fprintf(pomofptr, "1");
++
++				strncpy(returnString, bprintf("%.2d:%.2d", pomo_seconds/60, pomo_seconds%60), 50);
++			} else {
++
++				fclose(pomofptr);
++				openPomoFile(&pomofptr, "w");
++				fprintf(pomofptr, "0");
++
++				pomo_seconds = POMO_WORK_SECONDS;
++				previous_time = POMO_WORK_SECONDS;
++				pomo_state = 0;
++				pomo_sessions = 0;
++				pomo_blink = 0;
++				strncpy(returnString, bprintf("%.2d:%.2d", pomo_seconds/60, pomo_seconds%60), 50);
++			}
++
++			fclose(pomofptr);
++			return shouldBlink(returnString);
++		}
++
++		fclose(pomofptr);
++		return bprintf("error %s", state);
++	}
++#endif
+diff --git a/slstatus.c b/slstatus.c
+index 64da5cb..d89a74e 100644
+--- a/slstatus.c
++++ b/slstatus.c
+@@ -26,6 +26,7 @@ static Display *dpy;
+ static void
+ terminate(const int signo)
+ {
++	fclose(pomofptr);
+ 	if (signo != SIGUSR1)
+ 		done = 1;
+ }
+@@ -81,6 +82,7 @@ main(int argc, char *argv[])
+ 		die("XOpenDisplay: Failed to open display");
+ 	}
+ 
++	openPomoFile(&pomofptr, "w+");
+ 	do {
+ 		if (clock_gettime(CLOCK_MONOTONIC, &start) < 0) {
+ 			die("clock_gettime:");
+diff --git a/slstatus.h b/slstatus.h
+index b0f2564..83ee470 100644
+--- a/slstatus.h
++++ b/slstatus.h
+@@ -82,3 +82,6 @@ const char *vol_perc(const char *card);
+ /* wifi */
+ const char *wifi_perc(const char *interface);
+ const char *wifi_essid(const char *interface);
++
++/* pomodoro */
++const char *pomodoro(void);
+diff --git a/util.c b/util.c
+index 85366bf..b3e6c40 100644
+--- a/util.c
++++ b/util.c
+@@ -7,9 +7,17 @@
+ #include <string.h>
+ 
+ #include "util.h"
++#include "components/headers/values.h"
+ 
+ char *argv0;
+ 
++int pomo_seconds;
++int pomo_state;
++int pomo_sessions;
++int pomo_blink;
++int previous_time;
++FILE *pomofptr;
++
+ static void
+ verr(const char *fmt, va_list ap)
+ {
+@@ -144,3 +152,31 @@ pscanf(const char *path, const char *fmt, ...)
+ 
+ 	return (n == EOF) ? -1 : n;
+ }
++
++void
++openPomoFile(FILE **fptr, char *flag)
++{
++		char path[50];
++
++		if (esnprintf(path, sizeof(path), "%s/.pomodoro",
++				getenv("HOME")) < 0 ){
++			warn("couldn't get location of pomo file");
++			return;		
++		}
++
++		if(!(*fptr = fopen(path, flag))) {
++			warn("fopen '%s':", path);
++			return;
++		}
++
++		if (strcmp(flag, "w+") == 0) {
++			fprintf(*fptr, "0");
++			fclose(*fptr);
++			pomo_seconds = POMO_WORK_SECONDS;
++			previous_time = POMO_WORK_SECONDS;
++			pomo_state = 0;
++			pomo_sessions = 0;
++			pomo_blink = 0;
++		}
++}
++
+diff --git a/util.h b/util.h
+index 7f1f26c..e478358 100644
+--- a/util.h
++++ b/util.h
+@@ -1,5 +1,8 @@
+ /* See LICENSE file for copyright and license details. */
+ #include <stdint.h>
++#include <stdlib.h>
++#include <stdio.h>
++#include "components/headers/values.h"
+ 
+ extern char buf[1024];
+ 
+@@ -14,3 +17,7 @@ int esnprintf(char *str, size_t size, const char *fmt, ...);
+ const char *bprintf(const char *fmt, ...);
+ const char *fmt_human(uintmax_t num, int base);
+ int pscanf(const char *path, const char *fmt, ...);
++
++/* File pointer */
++extern FILE *pomofptr;
++void openPomoFile(FILE **fptr, char *flag);
+-- 
+2.30.2
+
